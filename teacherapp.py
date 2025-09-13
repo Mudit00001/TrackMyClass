@@ -13,6 +13,14 @@ c.execute('''CREATE TABLE IF NOT EXISTS students
               name TEXT, roll_no TEXT, class_section TEXT,
               father_name TEXT, contact TEXT, photo TEXT)''')
 
+c.execute('''CREATE TABLE IF NOT EXISTS student_remarks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER,
+                date TEXT,
+                remark TEXT,
+                FOREIGN KEY(student_id) REFERENCES students(id)
+            )''')
+
 c.execute('''CREATE TABLE IF NOT EXISTS attendance 
              (id INTEGER PRIMARY KEY AUTOINCREMENT,
               student_id INTEGER, date TEXT, status TEXT,
@@ -35,7 +43,7 @@ menu = [
     "Mark Attendance",
     "Class Attendance Overview",
     "Daily Notes",
-    "Reports"
+    "Reports", "Students Remarks"
 ]
 choice = st.sidebar.selectbox("Menu", menu)
 
@@ -303,6 +311,67 @@ elif choice == "Daily Notes":
                       (sid, today, note))
             conn.commit()
             st.success(f"✅ Note saved for {student}")
+
+# ---------- STUDENT REMARKS ----------
+elif choice == "Student Remarks":
+    st.subheader("📝 Student Remarks Tracker")
+
+    # Select class/section
+    students = pd.read_sql("SELECT * FROM students", conn)
+    if students.empty:
+        st.warning("No students found. Please add students first.")
+    else:
+        classes_list = students['class_section'].dropna().map(str).str.strip().unique().tolist()
+        classes_list = sorted(classes_list)
+
+        selected_class = st.selectbox("Select Class/Section", classes_list)
+
+        # Filter students
+        class_students = students[students['class_section'].str.strip() == selected_class]
+
+        if class_students.empty:
+            st.info("No students in this class.")
+        else:
+            # Let teacher pick date range
+            start_date = st.date_input("Start Date", date.today())
+            end_date = st.date_input("End Date", date.today())
+
+            if start_date > end_date:
+                st.error("Start date cannot be after end date.")
+            else:
+                # Generate list of dates
+                date_list = pd.date_range(start=start_date, end=end_date).strftime("%Y-%m-%d").tolist()
+
+                st.write("### Enter remarks for each student")
+
+                # Form to submit all remarks at once
+                with st.form("remarks_form"):
+                    remarks_data = {}
+                    for _, student in class_students.iterrows():
+                        st.markdown(f"**{student['name']} (Roll: {student['roll_no']})**")
+                        student_remarks = {}
+                        for d in date_list:
+                            # Check if remark already exists
+                            existing = pd.read_sql(
+                                f"SELECT remark FROM student_remarks WHERE student_id={student['id']} AND date='{d}'",
+                                conn
+                            )
+                            existing_remark = existing['remark'][0] if not existing.empty else ""
+                            student_remarks[d] = st.text_input(f"Remark for {d}", value=existing_remark, key=f"{student['id']}_{d}")
+                        remarks_data[student['id']] = student_remarks
+                        st.divider()
+
+                    save_remarks = st.form_submit_button("💾 Save Remarks")
+                    if save_remarks:
+                        for sid, dates_dict in remarks_data.items():
+                            for d, remark in dates_dict.items():
+                                # Delete old entry
+                                c.execute("DELETE FROM student_remarks WHERE student_id=? AND date=?", (sid, d))
+                                if remark.strip():  # only save if remark is not empty
+                                    c.execute("INSERT INTO student_remarks (student_id, date, remark) VALUES (?, ?, ?)", (sid, d, remark.strip()))
+                        conn.commit()
+                        st.success("✅ Remarks saved successfully!")
+
 
 # ---------- REPORTS ----------
 elif choice == "Reports":
