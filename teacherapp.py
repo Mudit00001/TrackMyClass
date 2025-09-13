@@ -312,65 +312,56 @@ elif choice == "Daily Notes":
             conn.commit()
             st.success(f"✅ Note saved for {student}")
 
-# ---------- STUDENT REMARKS ----------
-elif choice == "Student Remarks":
-    st.subheader("📝 Student Remarks Tracker")
+# ---------- STUDENTS REMARKS ----------
+elif choice == "Students Remarks":
+    st.subheader("📝 Students Remarks (Class-wise)")
 
-    # Select class/section
     students = pd.read_sql("SELECT * FROM students", conn)
     if students.empty:
         st.warning("No students found. Please add students first.")
     else:
+        # Select Class
         classes_list = students['class_section'].dropna().map(str).str.strip().unique().tolist()
         classes_list = sorted(classes_list)
+        selected_class = st.selectbox("Select Class/Section", ["All"] + classes_list)
 
-        selected_class = st.selectbox("Select Class/Section", classes_list)
-
-        # Filter students
-        class_students = students[students['class_section'].str.strip() == selected_class]
-
-        if class_students.empty:
-            st.info("No students in this class.")
+        if selected_class != "All":
+            filtered_students = students[students['class_section'].str.strip() == selected_class]
         else:
-            # Let teacher pick date range
+            filtered_students = students.copy()
+
+        if filtered_students.empty:
+            st.info(f"No students in Class/Section: {selected_class}.")
+        else:
+            st.write(f"### Students in Class/Section: {selected_class}")
+
+            # Choose number of days to show remarks for
+            num_days = st.number_input("Number of days to enter remarks", min_value=1, max_value=31, value=7)
             start_date = st.date_input("Start Date", date.today())
-            end_date = st.date_input("End Date", date.today())
 
-            if start_date > end_date:
-                st.error("Start date cannot be after end date.")
-            else:
-                # Generate list of dates
-                date_list = pd.date_range(start=start_date, end=end_date).strftime("%Y-%m-%d").tolist()
+            date_list = [start_date + pd.Timedelta(days=i) for i in range(num_days)]
 
-                st.write("### Enter remarks for each student")
-
-                # Form to submit all remarks at once
-                with st.form("remarks_form"):
-                    remarks_data = {}
-                    for _, student in class_students.iterrows():
-                        st.markdown(f"**{student['name']} (Roll: {student['roll_no']})**")
-                        student_remarks = {}
-                        for d in date_list:
-                            # Check if remark already exists
-                            existing = pd.read_sql(
-                                f"SELECT remark FROM student_remarks WHERE student_id={student['id']} AND date='{d}'",
-                                conn
-                            )
-                            existing_remark = existing['remark'][0] if not existing.empty else ""
-                            student_remarks[d] = st.text_input(f"Remark for {d}", value=existing_remark, key=f"{student['id']}_{d}")
-                        remarks_data[student['id']] = student_remarks
-                        st.divider()
-
-                    save_remarks = st.form_submit_button("💾 Save Remarks")
-                    if save_remarks:
-                        for sid, dates_dict in remarks_data.items():
-                            for d, remark in dates_dict.items():
-                                # Delete old entry
-                                c.execute("DELETE FROM student_remarks WHERE student_id=? AND date=?", (sid, d))
-                                if remark.strip():  # only save if remark is not empty
-                                    c.execute("INSERT INTO student_remarks (student_id, date, remark) VALUES (?, ?, ?)", (sid, d, remark.strip()))
+            for _, student in filtered_students.iterrows():
+                st.markdown(f"**{student['name']}** (Roll: {student['roll_no']})")
+                cols = st.columns(len(date_list))
+                for i, d in enumerate(date_list):
+                    # Generate a unique key for each student-date pair
+                    remark_key = f"remark_{student['id']}_{d}"
+                    existing_remark = pd.read_sql(
+                        "SELECT remark FROM student_remarks WHERE student_id=? AND date=?", 
+                        conn, params=(student['id'], str(d))
+                    )
+                    default_text = existing_remark['remark'][0] if not existing_remark.empty else ""
+                    remark = cols[i].text_input(str(d), value=default_text, key=remark_key)
+                    # Save/update remark immediately
+                    if remark != default_text:
+                        # Delete old remark if exists
+                        c.execute("DELETE FROM student_remarks WHERE student_id=? AND date=?", (student['id'], str(d)))
+                        c.execute("INSERT INTO student_remarks (student_id, date, remark) VALUES (?, ?, ?)", 
+                                  (student['id'], str(d), remark))
                         conn.commit()
-                        st.success("✅ Remarks saved successfully!")
+            st.success("✅ Remarks updated successfully!")
+
 
 
 # ---------- REPORTS ----------
