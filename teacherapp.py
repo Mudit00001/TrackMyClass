@@ -3,6 +3,8 @@ import pandas as pd
 import sqlite3
 from datetime import date
 
+
+
 # ---------- DATABASE SETUP ----------
 conn = sqlite3.connect("students.db", check_same_thread=False)
 c = conn.cursor()
@@ -43,7 +45,7 @@ menu = [
     "Mark Attendance",
     "Class Attendance Overview",
     "Daily Notes",
-    "Reports", "Students Remarks"
+    "Reports", "Students Remarks", "AI Insights"
 ]
 choice = st.sidebar.selectbox("Menu", menu)
 
@@ -361,6 +363,193 @@ elif choice == "Students Remarks":
                                   (student['id'], str(d), remark))
                         conn.commit()
             st.success("✅ Remarks updated successfully!")
+
+# ---------- AI INSIGHTS ----------
+elif choice == "AI Insights":
+    st.subheader("🤖 AI Insights - Class Summary (Mistral)")
+
+    students = pd.read_sql("SELECT * FROM students", conn)
+
+    if students.empty:
+        st.warning("No students found. Please add students first.")
+    else:
+        # Select Class
+        classes_list = students['class_section'].dropna().map(str).str.strip().unique().tolist()
+        classes_list = sorted(classes_list)
+
+        selected_class = st.selectbox("Select Class/Section", classes_list)
+
+        start_date = st.date_input("Start Date", date.today())
+        end_date = st.date_input("End Date", date.today())
+
+        if st.button("🔍 Generate AI Summary"):
+            # --- Attendance Data ---
+            attendance_query = """
+                SELECT s.name, s.roll_no, a.date, a.status
+                FROM attendance a
+                JOIN students s ON a.student_id = s.id
+                WHERE s.class_section=? AND date BETWEEN ? AND ?
+                ORDER BY a.date
+            """
+            attendance_df = pd.read_sql(attendance_query, conn, params=(selected_class, str(start_date), str(end_date)))
+
+            # --- Remarks Data ---
+            remarks_query = """
+                SELECT s.name, sr.date, sr.remark
+                FROM student_remarks sr
+                JOIN students s ON sr.student_id = s.id
+                WHERE s.class_section=? AND date BETWEEN ? AND ?
+            """
+            remarks_df = pd.read_sql(remarks_query, conn, params=(selected_class, str(start_date), str(end_date)))
+
+            # --- Notes Data ---
+            notes_query = """
+                SELECT s.name, act.date, act.note
+                FROM activities act
+                JOIN students s ON act.student_id = s.id
+                WHERE s.class_section=? AND date BETWEEN ? AND ?
+            """
+            notes_df = pd.read_sql(notes_query, conn, params=(selected_class, str(start_date), str(end_date)))
+
+            # --- Build context for AI ---
+            summary_text = f"Class {selected_class} summary from {start_date} to {end_date}.\n\n"
+
+            if not attendance_df.empty:
+                summary_text += "📋 Attendance Records:\n"
+                for _, row in attendance_df.iterrows():
+                    summary_text += f"{row['date']}: {row['name']} - {row['status']}\n"
+            if not remarks_df.empty:
+                summary_text += "\n📝 Remarks:\n"
+                for _, row in remarks_df.iterrows():
+                    summary_text += f"{row['date']}: {row['name']} - {row['remark']}\n"
+            if not notes_df.empty:
+                summary_text += "\n📚 Activities/Notes:\n"
+                for _, row in notes_df.iterrows():
+                    summary_text += f"{row['date']}: {row['name']} - {row['note']}\n"
+
+            # --- AI Summary using Ollama ---
+            try:
+                import ollama
+
+                prompt = f"""
+                You are an assistant helping a teacher.
+                Summarize the following class data into a clear report:
+                Attendance trends, key remarks, and daily notes.
+                Be concise but insightful.
+
+                Data:
+                {summary_text}
+                """
+
+                response = ollama.chat(model="mistral", messages=[
+                    {"role": "user", "content": prompt}
+                ])
+
+                ai_summary = response['message']['content']
+                st.markdown("### 🤖 AI Generated Summary")
+                st.info(ai_summary)
+
+            except Exception as e:
+                st.error(f"AI summary could not be generated: {e}")
+                st.text_area("Raw data for manual review", summary_text, height=300)
+
+# ---------- AI INSIGHTS ----------
+elif choice == "AI Insights":
+    st.subheader("🤖 AI Insights - Class Summary (Ollama)")
+
+    students = pd.read_sql("SELECT * FROM students", conn)
+
+    if students.empty:
+        st.warning("No students found. Please add students first.")
+    else:
+        # Select Class
+        classes_list = students['class_section'].dropna().map(str).str.strip().unique().tolist()
+        classes_list = sorted(classes_list)
+
+        selected_class = st.selectbox("Select Class/Section", classes_list)
+
+        start_date = st.date_input("Start Date", date.today())
+        end_date = st.date_input("End Date", date.today())
+
+        if st.button("🔍 Generate AI Summary"):
+            # --- Attendance Data ---
+            attendance_query = """
+                SELECT s.name, s.roll_no, a.date, a.status
+                FROM attendance a
+                JOIN students s ON a.student_id = s.id
+                WHERE s.class_section=? AND date BETWEEN ? AND ?
+                ORDER BY a.date
+            """
+            attendance_df = pd.read_sql(attendance_query, conn, params=(selected_class, str(start_date), str(end_date)))
+
+            # --- Remarks Data ---
+            remarks_query = """
+                SELECT s.name, sr.date, sr.remark
+                FROM student_remarks sr
+                JOIN students s ON sr.student_id = s.id
+                WHERE s.class_section=? AND date BETWEEN ? AND ?
+            """
+            remarks_df = pd.read_sql(remarks_query, conn, params=(selected_class, str(start_date), str(end_date)))
+
+            # --- Notes Data ---
+            notes_query = """
+                SELECT s.name, act.date, act.note
+                FROM activities act
+                JOIN students s ON act.student_id = s.id
+                WHERE s.class_section=? AND date BETWEEN ? AND ?
+            """
+            notes_df = pd.read_sql(notes_query, conn, params=(selected_class, str(start_date), str(end_date)))
+
+            # --- Build context for AI ---
+            summary_text = f"Class {selected_class} summary from {start_date} to {end_date}.\n\n"
+
+            if not attendance_df.empty:
+                summary_text += "📋 Attendance Records:\n"
+                for _, row in attendance_df.iterrows():
+                    summary_text += f"{row['date']}: {row['name']} - {row['status']}\n"
+            if not remarks_df.empty:
+                summary_text += "\n📝 Remarks:\n"
+                for _, row in remarks_df.iterrows():
+                    summary_text += f"{row['date']}: {row['name']} - {row['remark']}\n"
+            if not notes_df.empty:
+                summary_text += "\n📚 Activities/Notes:\n"
+                for _, row in notes_df.iterrows():
+                    summary_text += f"{row['date']}: {row['name']} - {row['note']}\n"
+
+            # --- AI Summary using Ollama ---
+            try:
+                import ollama
+
+                prompt = f"""
+                You are an assistant helping a teacher.
+                Summarize the following class data into a clear report:
+                - Attendance trends (who was frequently absent/present)
+                - Key remarks/issues raised
+                - Activities or notes worth highlighting
+                - Provide an overall summary for the class teacher
+                
+                Important rule:-
+                - Use ONLY the data provided below.
+                - If no data is available for a section, explicitly say: "No records available".
+                - Do NOT invent or assume extra details.
+
+                Data:
+                {summary_text}
+                """
+
+                response = ollama.chat(
+                    model="mistral",   # or "gemma:2b" if you prefer
+                    messages=[{"role": "user", "content": prompt}]
+                )
+
+                ai_summary = response["message"]["content"]
+                st.markdown("### 🤖 AI Generated Summary")
+                st.info(ai_summary)
+
+            except Exception as e:
+                st.error(f"AI summary could not be generated: {e}")
+                st.text_area("Raw data for manual review", summary_text, height=300)
+
 
 
 
